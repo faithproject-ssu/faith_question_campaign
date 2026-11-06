@@ -54,6 +54,14 @@ service cloud.firestore {
         && (request.resource.data.count == resource.data.count + 1
             || request.resource.data.count == resource.data.count - 1);
     }
+    match /stats/{id} {
+      allow read: if true;
+      allow create: if id in ['visits', 'visitors', 'qr_visits', 'qr_visitors']
+        && request.resource.data.keys().hasOnly(['count'])
+        && request.resource.data.count == 1;
+      allow update: if request.resource.data.keys().hasOnly(['count'])
+        && request.resource.data.count == resource.data.count + 1;
+    }
   }
 }
 ```
@@ -61,3 +69,18 @@ service cloud.firestore {
 한 기기에서는 한 번만 누를 수 있지만(브라우저에 기억), 로그인이 없으므로 작정하고 숫자를 부풀리는 것까지 완전히 막지는 못합니다.
 
 좋아요 숫자 확인/초기화: Firebase 콘솔 → Firestore Database → `likes` 컬렉션.
+
+## 접속자 수
+
+Firebase 콘솔 → Firestore Database → 데이터 → `stats` 컬렉션에서 확인합니다. 개인 정보는 저장하지 않고 숫자만 올라갑니다.
+
+| 문서 | 뜻 |
+|---|---|
+| visitors | 방문자 수 (기기·브라우저당 처음 한 번) |
+| visits | 접속 횟수 (브라우저를 새로 열 때마다, 새로고침 제외) |
+| qr_visitors | 그중 QR로 처음 들어온 방문자 수 |
+| qr_visits | 그중 QR로 들어온 접속 횟수 |
+
+- QR에는 `https://faithproject-ssu.github.io/faith_question_campaign/?from=qr` 주소를 담습니다. `?from=qr`은 집계 후 주소창에서 자동으로 지워집니다.
+- 운영자 본인 제외: 주소 끝에 `?notrack`을 붙여 한 번 열면 그 브라우저는 집계에서 빠집니다. (폰·PC 각각 한 번씩)
+- 홈에 "지금까지 N명이 함께 봤어요"를 보이려면 `script.js`의 `showVisitorCount: false`를 `true`로 바꿉니다.

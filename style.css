@@ -682,6 +682,10 @@ h1[tabindex]:focus, h1[tabindex]:focus-visible { outline: none; }
 .pop { animation: pop .42s var(--ease); }
 @keyframes pop { 0% { transform: scale(1); } 35% { transform: scale(1.18); } 100% { transform: scale(1); } }
 
+.hero-visitors { margin: 10px 0 0; font-size: 14px; color: var(--sub); }
+.hero-visitors .n { color: var(--accent); font-weight: 750; font-variant-numeric: tabular-nums; }
+.hero-visitors[hidden] { display: none; }
+
 /* ---------- 홈 화면에 추가 카드 ---------- */
 .install-wrap { padding-top: 14px; }
 .install-card {

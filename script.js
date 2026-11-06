@@ -83,7 +83,10 @@ const ARTICLES = [
 const APP = {
   title: '믿음이 자격이 되는 순간',
   subtitle: '“교육자의 자격은 신앙으로 결정되어야 할까요?”',
-  note: '종교 자체에 대한 비난이 아니라, 종교적 자격 요건과 채용의 공정성 사이의 문제를 질문합니다.'
+  note: '종교 자체에 대한 비난이 아니라, 종교적 자격 요건과 채용의 공정성 사이의 문제를 질문합니다.',
+  // 홈 화면에 "지금까지 N명이 함께 봤어요"를 보여 줄지 (true = 보이기, false = 숨기기)
+  // 숫자는 공개 여부와 상관없이 Firebase 콘솔 → Firestore → stats 에서 항상 볼 수 있습니다.
+  showVisitorCount: false
 };
 
 /* ========================================================= */
@@ -197,6 +200,73 @@ const APP = {
     });
 
     return { enabled, load, toggle, paint };
+  })();
+
+  /* ---------- 접속자 수 (Firebase Firestore → stats) ----------
+     visits      : 접속 횟수 (브라우저를 새로 열 때마다 1, 새로고침은 제외)
+     visitors    : 방문자 수 (기기·브라우저당 처음 한 번만)
+     qr_visits   : 그중 QR로 들어온 접속 횟수 (주소에 ?from=qr)
+     qr_visitors : 그중 QR로 처음 들어온 방문자 수
+     운영자 본인은 주소 끝에 ?notrack 을 붙여 한 번 열면 이후 집계에서 빠집니다. */
+  const stats = (() => {
+    const cfg = window.FIREBASE_CONFIG || {};
+    const enabled = !!(cfg.apiKey && cfg.projectId);
+    const docs = `projects/${cfg.projectId}/databases/(default)/documents`;
+    const api = `https://firestore.googleapis.com/v1/${docs}`;
+    const key = `key=${encodeURIComponent(cfg.apiKey || '')}`;
+    const ssGet = k => { try { return sessionStorage.getItem(k); } catch (e) { return null; } };
+    const ssSet = (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) { /* noop */ } };
+
+    // 주소 정리: ?from=qr, ?notrack 은 읽은 뒤 주소창에서 지움(공유·즐겨찾기에 남지 않게)
+    let params;
+    try { params = new URLSearchParams(location.search); } catch (e) { params = new URLSearchParams(''); }
+    const fromQR = params.get('from') === 'qr';
+    const optOut = params.has('notrack');
+    if (optOut) lsSet('notrack', '1');
+    if (params.has('from') || optOut) {
+      params.delete('from'); params.delete('notrack');
+      const q = params.toString();
+      try { history.replaceState(history.state, '', location.pathname + (q ? '?' + q : '') + location.hash); } catch (e) { /* noop */ }
+    }
+
+    function record() {
+      if (!enabled || lsGet('notrack') === '1') return;
+      const ids = [];
+      const newSession = ssGet('counted') !== '1';
+      if (newSession) { ids.push('visits'); if (fromQR) ids.push('qr_visits'); }
+      if (lsGet('visited') !== '1') ids.push('visitors');
+      if (fromQR && lsGet('visited_qr') !== '1') ids.push('qr_visitors');
+      if (!ids.length) return;
+      fetch(`${api}:commit?${key}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        keepalive: true,
+        body: JSON.stringify({ writes: ids.map(id => ({
+          update: { name: `${docs}/stats/${id}`, fields: {} },
+          updateMask: { fieldPaths: [] },
+          updateTransforms: [{ fieldPath: 'count', increment: { integerValue: '1' } }]
+        })) })
+      }).then(r => {
+        if (!r.ok) return;
+        ssSet('counted', '1');
+        lsSet('visited', '1');
+        if (fromQR) lsSet('visited_qr', '1');
+      }).catch(() => { /* 집계 실패는 화면에 영향 없음 */ });
+    }
+
+    async function paintVisitors(root = document) {
+      const el = root.querySelector('[data-visitors]');
+      if (!el || !enabled) return;
+      try {
+        const r = await fetch(`${api}/stats/visitors?${key}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        const n = Number(j.fields && j.fields.count && j.fields.count.integerValue || 0);
+        if (n > 0) { el.querySelector('.n').textContent = n.toLocaleString('ko-KR'); el.hidden = false; }
+      } catch (e) { /* noop */ }
+    }
+
+    return { enabled, record, paintVisitors, fromQR, optOut };
   })();
 
   // 화면 조각: 숫자 배지(목록 카드), 공감 버튼(홈), 좋아요 블록(질문 상세)
@@ -367,6 +437,7 @@ const APP = {
       <section class="hero" aria-label="캠페인 소개">
         <p class="hero-quote">${esc(APP.subtitle).replace('신앙', '<span class="mark">신앙</span>')}</p>
         <p class="hero-note">${esc(APP.note)}</p>
+        ${APP.showVisitorCount && stats.enabled ? `<p class="hero-visitors" data-visitors hidden>지금까지 <b class="n"></b>명이 함께 봤어요</p>` : ''}
         ${likes.enabled ? `<div class="hero-like">
           <button class="like-pill" type="button" data-like="home" aria-pressed="false" aria-label="이 캠페인에 공감해요">${ICON.heart}<span>공감해요</span></button>
           <span class="hero-like-count" data-like-count="home"><b class="n">–</b>명이 공감했어요</span>
@@ -539,6 +610,7 @@ const APP = {
 
   function bindScreen(el) {
     likes.paint(el);
+    stats.paintVisitors(el);
     // 이미지 없을 때 플레이스홀더
     el.querySelectorAll('img[data-guard]').forEach(img => {
       const box = img.closest('.media');
@@ -809,4 +881,6 @@ const APP = {
   history.replaceState({ idx: 0 }, '', hashOf(first));
   render(first, 'none');
   likes.load();
+  stats.record();
+  if (stats.optOut) toast('이 브라우저는 이제 접속자 수에서 빠져요');
 })();
